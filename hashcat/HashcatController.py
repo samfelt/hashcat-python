@@ -1,6 +1,8 @@
 from .Modes import HashMode, AttackMode
-import subprocess
+import logging
 import os
+import subprocess
+import sys
 
 
 class HashcatController(object):
@@ -9,14 +11,28 @@ class HashcatController(object):
     binary. Hashcat can be run multiple times from one HashcatController.
     """
 
-    def __init__(self, binary):
+    def __init__(
+            self,
+            binary="/usr/bin/hashcat",
+            log_to_console=False,
+            logs_dir=None
+    ):
         """Initialize the controller object."""
+        self.logs_dir = logs_dir
+        self.logger = self._setup_logger(logs_dir, log_to_console)
+        self.logger.debug("Initializing HashcatController")
+
         if not os.access(binary, os.X_OK):
+            self.loggger.error(f"{binary} is not an executable file")
             raise Exception(f"{binary} is not an executable file")
         self.bin = binary
+        self.logger.debug(f"Using hahscat at {self.bin}")
         version = subprocess.check_output([self.bin, "--version"])
         self.version = version.decode().strip()
+        self.logger.debug(f"hashcat {self.version}")
+
         self.benchmarks = {}
+        self.logger.debug("No benchmarks run")
 
         self.arguments = {}
         self.hashlist = None
@@ -25,6 +41,57 @@ class HashcatController(object):
 
         self._command = []
         self.proc = None
+        self.logger.debug("Done initializing HashcatController")
+
+    def _setup_logs(self, directory, log_to_console):
+        """
+        """
+        try:
+            os.mkdir(directory)
+        except FileExistsError:
+            raise FileExistsError(f"Cannot use '{directory}' as logs_dir")
+
+    def _setup_logger(self, logs_dir, log_to_console):
+        """
+        Setup logging. This includes a directory to store the logs and results
+        produced by the controller. If the the directory already exists, throw
+        an error. And logging directly to the console if desired.
+
+        Return the logger object for the controller to use
+        """
+        log_format_str = "%(asctime)s"
+        log_format_str += " | %(name)s"
+        log_format_str += " | %(levelname)s"
+        log_format_str += " | %(filename)s:%(funcName)s::%(message)s"
+        log_format = logging.Formatter(log_format_str)
+
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.DEBUG)
+        if log_to_console:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(log_format)
+            logger.addHandler(console_handler)
+
+        if logs_dir:
+            try:
+                os.mkdir(logs_dir)
+            except FileExistsError:
+                raise FileExistsError(f"Cannot use '{directory}' as logs_dir")
+            file_handler = logging.FileHandler(
+                f"{self.logs_dir}/controller.log"
+            )
+            file_handler.setFormatter(log_format)
+            logger.addHandler(file_handler)
+
+        logger.propogate = False
+
+        if log_to_console:
+            logger.info("Logger setup to log to console")
+        if logs_dir:
+            logger.info(f"Logger setup to store logs in {logs_dir}")
+
+
+        return logger
 
     def benchmark(self, mode):
         """
@@ -40,6 +107,7 @@ class HashcatController(object):
         results = output.decode().strip().split("\n")[2].split(":")
         hashes_per_second = results[5]
         self.benchmarks[mode] = hashes_per_second
+        self.logger.debug(f"Benchmark for {mode.name}, {hashes_per_second}")
         return hashes_per_second
 
     def set_hashlist(self, hashlist):
@@ -49,6 +117,7 @@ class HashcatController(object):
             raise Exception(f"{hashlist} is not an readable file")
 
         self.hashlist = hashlist
+        self.logger.debug(f"Hashlist set to {hashlist}")
 
     def set_attack(self, mode, **kwargs):
         """
@@ -197,16 +266,16 @@ class HashcatController(object):
         )
         return self.proc.pid
 
-    def wait(self):
+    def wait(self, timeout=None):
         """
-        After a hashcat session has started, wait for it to finish. Return the
-        return code, stdout, and stderr.
+        After a hashcat session has started, wait for it to finish. Timeout
+        after timeout seconds. Return the return code, stdout, and stderr.
         """
 
         if self.proc is None:
             raise Exception("No hashcat process was started")
 
-        return_code = self.proc.wait()
+        return_code = self.proc.wait(timeout)
         return return_code, self.proc.stdout, self.proc.stderr
 
     def show(self):
