@@ -43,14 +43,6 @@ class HashcatController(object):
         self.proc = None
         self.logger.debug("Done initializing HashcatController")
 
-    def _setup_logs(self, directory, log_to_console):
-        """
-        """
-        try:
-            os.mkdir(directory)
-        except FileExistsError:
-            raise FileExistsError(f"Cannot use '{directory}' as logs_dir")
-
     def _setup_logger(self, logs_dir, log_to_console):
         """
         Setup logging. This includes a directory to store the logs and results
@@ -72,11 +64,25 @@ class HashcatController(object):
             console_handler.setFormatter(log_format)
             logger.addHandler(console_handler)
 
-        if logs_dir:
+        def _create_logs_dir(logs_dir, modifier=None):
+            full_name = logs_dir
+            if modifier is not None:
+                full_name += f"_{modifier}"
             try:
-                os.mkdir(logs_dir)
+                os.mkdir(full_name)
             except FileExistsError:
-                raise FileExistsError(f"Cannot use '{directory}' as logs_dir")
+                if modifier is None:
+                    modifier = 1
+                else:
+                    modifier += 1
+                name = _create_logs_dir(logs_dir, modifier)
+                return name
+
+            # If everything is sucessful, return the final directory name
+            return full_name
+
+        if logs_dir:
+            self.logs_dir = _create_logs_dir(logs_dir)
             file_handler = logging.FileHandler(
                 f"{self.logs_dir}/controller.log"
             )
@@ -88,7 +94,7 @@ class HashcatController(object):
         if log_to_console:
             logger.info("Logger setup to log to console")
         if logs_dir:
-            logger.info(f"Logger setup to store logs in {logs_dir}")
+            logger.info(f"Logger setup to store logs in {self.logs_dir}")
 
 
         return logger
@@ -114,7 +120,9 @@ class HashcatController(object):
         """Set the path to the hashlist that should be cracked."""
 
         if not os.access(hashlist, os.R_OK):
-            raise Exception(f"{hashlist} is not an readable file")
+            error_msg = f"{hashlist} is not an readable file"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
 
         self.hashlist = hashlist
         self.logger.debug(f"Hashlist set to {hashlist}")
@@ -147,23 +155,33 @@ class HashcatController(object):
         if mode == AttackMode.straight:
             wordlist = kwargs.get("wordlist")
             if not wordlist:
-                raise Exception("'wordlist' arg is required for strait attack")
+                error_msg = f"'wordlist' arg is required for strait attack"
+                self.logger.error(error_msg)
+                raise Exception(error_msg)
             if not os.access(wordlist, os.R_OK):
-                raise Exception(f"{wordlist} is not an readable file")
+                error_msg = f"{wordlist} is not an readable file"
+                self.logger.error(error_msg)
+                raise Exception(error_msg)
             self.wordlist = wordlist
+            self.logger.debug(f"Attack Mode set to '{mode}'")
+            self.logger.debug(f"Straing Attack Wordlist set to '{wordlist}'")
 
         # Brute Force (Mask) Attack
         elif mode == AttackMode.brute_force:
             mask = kwargs.get("mask")
             if not mask:
-                raise Exception(
-                    "'mask' arg is required for brue forece attack"
-                )
+                error_msg = "'mask' arg is required for brue forece attack"
+                self.logger.error(error_msg)
+                raise Exception(error_msg)
 
             self.mask = mask
+            self.logger.debug(f"Attack Mode set to '{mode}'")
+            self.logger.debug(f"Brute Force Mask set to '{mask}'")
 
         else:
-            raise Exception(f"{mode} has not been implimented yet")
+            error_msg = f"{mode} has not been implimented yet"
+            self.logger.error(error_msg)
+            raise Exception(error_msg)
 
         self.arguments["--attack-mode"] = mode.value
 
@@ -177,8 +195,10 @@ class HashcatController(object):
         if type(mode) != int:
             error = "Hash type must be set to HashMode or int,"
             error += f" got {type(mode)}"
+            self.logger.error(error)
             raise TypeError(error)
 
+        self.logger.debug(f"Hash Mode set to '{mode}'")
         self.arguments["--hash-type"] = mode
 
     def add_argument(self, arg, value=None):
@@ -196,6 +216,7 @@ class HashcatController(object):
         for method, args in arg_exceptions.items():
             if arg in args:
                 err = f"Don't use `add_argument` for {arg}, use {method}"
+                self.logger.error(err)
                 raise Exception(err)
 
         self.arguments[arg] = value
@@ -219,11 +240,17 @@ class HashcatController(object):
         """
 
         if not ("--attack-mode" in self.arguments.keys()):
-            raise Exception("Attack mode has not been set, use set_attack")
+            msg = "Attack mode has not been set, use set_attack"
+            self.logger.error(msg)
+            raise Exception(msg)
         if not ("--hash-type" in self.arguments.keys()):
-            raise Exception("Hash type has not been set, use set_hash_type")
+            msg = "Hash type has not been set, use set_hash_type"
+            self.logger.error(msg)
+            raise Exception(msg)
         if self.hashlist is None:
-            raise Exception("Hashlist has not been set, use set_hashlist")
+            msg = "Hashlist has not been set, use set_hashlist"
+            self.logger.error(msg)
+            raise Exception(msg)
 
         command = [self.bin]
         command += [
@@ -236,19 +263,24 @@ class HashcatController(object):
         attack_mode = self.arguments["--attack-mode"]
         if attack_mode == AttackMode.straight.value:
             if self.wordlist is None:
-                raise Exception("Wordlist has not been set, use set_wordlist")
+                msg = "Wordlist has not been set, use set_wordlist"
+                self.logger.error(msg)
+                raise Exception(msg)
             command += [self.wordlist]
 
         elif attack_mode == AttackMode.brute_force.value:
             if self.mask is None:
-                raise Exception("Mask has not been set, use set_mask")
+                msg = "Mask has not been set, use set_mask"
+                self.logger.error(msg)
+                raise Exception(msg)
             command += [self.mask]
 
         # General checkall until other attack types are implimented
         else:
-            raise Exception(
-                f"attack mode {AttackMode(attack_mode)} is not implimented yet"
-            )
+            msg = f"attack mode {AttackMode(attack_mode)} is not implimented yet"
+            self.logger.error(msg)
+            raise Exception(msg)
+        self.logger.debug(f"Command generated successfully, '{command}'")
         self._command = command
 
     def run(self):
@@ -264,6 +296,7 @@ class HashcatController(object):
             stderr=subprocess.PIPE,
             shell=False,
         )
+        self.logger.debug(f"Command run, pid = {self.proc.pid}")
         return self.proc.pid
 
     def wait(self, timeout=None):
@@ -273,7 +306,9 @@ class HashcatController(object):
         """
 
         if self.proc is None:
-            raise Exception("No hashcat process was started")
+            msg = "No hashcat process was started"
+            self.logger.error(msg)
+            raise Exception(msg)
 
         return_code = self.proc.wait(timeout)
         return return_code, self.proc.stdout, self.proc.stderr
@@ -285,6 +320,7 @@ class HashcatController(object):
         """
 
         self._generate_command()
+        self.logger.debug("Adding '--show' to run 'show' command")
         output = subprocess.check_output(self._command + ["--show"])
         return output.decode().split()
 
@@ -295,5 +331,6 @@ class HashcatController(object):
         """
 
         self._generate_command()
+        self.logger.debug("Adding '--left' to run 'left' command")
         output = subprocess.check_output(self._command + ["--left"])
         return output.decode().split()
